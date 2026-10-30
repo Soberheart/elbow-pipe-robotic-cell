@@ -1,0 +1,31 @@
+digraph G {
+  graph [rankdir=TB, nodesep=0.5, ranksep=0.25, bgcolor=white, pad=0.3, splines=ortho];
+  node  [shape=box, style="rounded,filled", fillcolor="#EAF2FB", color="#3B6EA8", fontname="Helvetica", fontsize=12, width=3.4, height=0.55];
+  edge  [color="#444444", fontname="Helvetica", fontsize=11, arrowsize=0.7];
+  start [label="Start (main)", shape=oval, fillcolor="#D5E8D4", color="#5A8F55", width=1.8];
+  init  [label="Init: AccSet/VelSet, reset I/O, Home,\nopen cycle_log.csv, start batch clock"];
+  vis   [label="GetVisionOffset:\nrandom dx, dy (±20 mm), dRz (±10°)\n→ wobjVision.oframe", fillcolor="#FDEBD0", color="#C07A2B"];
+  ready [label="diPartReady = 1 ?", shape=diamond, fillcolor="#FFF2CC", color="#B8962E", width=2.8, height=0.85];
+  pick  [label="PickConveyor: MoveJ above CP1 → MoveL down\ndoVacuum = 1, GripLoad ldElbowCP1, retract"];
+  pint  [label="PlaceInterim: MoveJ → MoveL to cradle\ndoVacuum = 0, GripLoad load0"];
+  gask  [label="InsertGasket: PulseDO doGasket,\nmove over CP2, dwell 1.5 s"];
+  regr  [label="RegripInterim: MoveL to CP2\ndoVacuum = 1, GripLoad ldElbowCP2"];
+  pbox  [label="PlaceBox: layer = n DIV 4, slot = n MOD 4\nOffs(pCP2, ox, oy, oz) → release, retract"];
+  log   [label="Stop cycle clock, LogCycle\n(TPWrite + CSV)"];
+  full  [label="nCount = 8 ?", shape=diamond, fillcolor="#FFF2CC", color="#B8962E", width=2.2, height=0.8];
+  chg   [label="ChangeBox: PulseDO doBoxFull, nCount = 0"];
+  done  [label="nTotal = nBatch ?", shape=diamond, fillcolor="#FFF2CC", color="#B8962E", width=2.4, height=0.8];
+  stop  [label="Home, Report (avg / min / max,\nthroughput), close log — End", shape=oval, fillcolor="#F8CECC", color="#B85450", width=3.2];
+  wait  [label="WaitDI\n(max 30 s)", width=1.1, fillcolor="#F2F2F2", color="#888888"];
+
+  start -> init -> vis -> ready;
+  ready -> pick [xlabel="Yes "];
+  ready -> wait [xlabel="No"]; wait -> ready [constraint=false];
+  { rank=same; ready; wait; }
+  pick -> pint -> gask -> regr -> pbox -> log -> full;
+  full -> chg [xlabel="Yes "];
+  full -> done [xlabel="No "];
+  chg -> done;
+  done -> stop [xlabel="Yes "];
+  done -> vis [xlabel="No", constraint=false];
+}

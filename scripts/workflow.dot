@@ -1,0 +1,29 @@
+digraph W {
+  graph [rankdir=LR, bgcolor=white, pad=0.3, nodesep=0.5, ranksep=0.6, fontname="Helvetica",
+         label="Cell workflow – material flow (solid) and signals (dashed)", labelloc=t, fontsize=16];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=12, fillcolor="#EAF2FB", color="#3B6EA8", margin="0.2,0.1"];
+  edge [fontname="Helvetica", fontsize=10, color="#333333", penwidth=1.6];
+
+  imm  [label="Injection moulding\n(upstream)", fillcolor="#EEEEEE", color="#888888"];
+  conv [label="Infeed belt conveyor\nSmart Component:\nSource → LinearMover\n→ PlaneSensor"];
+  vis  [label="Simulated vision\n(random dx, dy, dRz →\nwobjVision.oframe)", fillcolor="#FDEBD0", color="#C07A2B"];
+  rob  [label="IRB 1300 + vacuum gripper\n(RAPID: ElbowPickPlace)", shape=box3d, fillcolor="#D6EAF8", color="#1F618D"];
+  int  [label="Interim station\ncradle + gasket press"];
+  box  [label="Packing box\n2 × 2 slots × 2 layers"];
+  out  [label="Carton roller conveyor\n(full box out / empty in)", fillcolor="#EEEEEE", color="#888888"];
+
+  imm -> conv [label="elbow"];
+  conv -> rob [label=" pick @ CP1"];
+  rob -> int [label=" place"];
+  int -> rob [label=" re-grip @ CP2\n(after gasket)"];
+  rob -> box [label=" place @ slot n"];
+  box -> out [label=" 8 parts"];
+
+  conv -> rob [style=dashed, color="#C0392B", label="diPartReady", fontcolor="#C0392B", constraint=false];
+  rob -> conv [style=dashed, color="#C0392B", label="doConvStop", fontcolor="#C0392B", constraint=false];
+  vis -> rob [style=dashed, color="#C07A2B", label="offset", fontcolor="#C07A2B"];
+  rob -> int [style=dashed, color="#C0392B", label="doGasket", fontcolor="#C0392B", constraint=false];
+  rob -> out [style=dashed, color="#C0392B", label="doBoxFull", fontcolor="#C0392B", constraint=false];
+  { rank=same; vis; conv; }
+  { rank=same; int; box; }
+}
