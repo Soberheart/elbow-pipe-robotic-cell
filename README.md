@@ -44,3 +44,10 @@ dot -Tpng scripts/program_flow.dot -o figures/fig_program_flow.png
 - [x] CAD models, RAPID program, diagrams, report draft
 - [ ] RobotStudio station (Smart Components, I/O), simulation run, Pack & Go
 - [ ] Measured cycle time and screenshots in the report
+
+## CATIA
+
+CATIA V5 cannot open the STL meshes without the STL / DSE workbench licence. Instead run
+`cad/catia/build_cell_catia.catvbs` (Tools ▸ Macro ▸ Macros…): it builds every part natively in
+Part Design, saves CATPart + STEP, and assembles `cell_assembly.CATProduct`.
+Dimension checklist: `docs/Model_Dimension_Checklist_zh.md`.

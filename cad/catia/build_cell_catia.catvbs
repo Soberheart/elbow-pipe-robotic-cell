@@ -1,0 +1,290 @@
+' ==========================================================================
+' Elbow-pipe robotic cell - CATIA V5 builder macro (VBScript, .catvbs)
+' Tools > Macro > Macros... > Macro libraries: add the folder of this file,
+' select build_cell_catia.catvbs > Run.  Builds parts as CATPart + STEP and
+' the assembly cell_assembly.CATProduct (+ STEP) in the chosen folder.
+' Units: mm.  World frame = robot base centre on the floor.
+' ==========================================================================
+Dim gPart, gBody, gSF, gHSF, gHB, gN
+
+Sub NewSketch(a, b, c, d, ox, oy, oz, hx, hy, hz, vx, vy, vz, sk)
+    Dim pl, ref
+    Set pl = gHSF.AddNewPlaneEquation(a, b, c, d)
+    gHB.AppendHybridShape pl
+    pl.Name = "Plane_" & gN
+    gPart.InWorkObject = gBody
+    Set ref = gPart.CreateReferenceFromObject(pl)
+    Set sk = gBody.Sketches.Add(ref)
+    sk.SetAbsoluteAxisData Array(ox, oy, oz, hx, hy, hz, vx, vy, vz)
+    gN = gN + 1
+End Sub
+
+Sub Rect(f2d, x0, y0, x1, y1)
+    Dim p1, p2, p3, p4, l1, l2, l3, l4
+    Set p1 = f2d.CreatePoint(x0, y0): Set p2 = f2d.CreatePoint(x1, y0)
+    Set p3 = f2d.CreatePoint(x1, y1): Set p4 = f2d.CreatePoint(x0, y1)
+    Set l1 = f2d.CreateLine(x0, y0, x1, y0): l1.StartPoint = p1: l1.EndPoint = p2
+    Set l2 = f2d.CreateLine(x1, y0, x1, y1): l2.StartPoint = p2: l2.EndPoint = p3
+    Set l3 = f2d.CreateLine(x1, y1, x0, y1): l3.StartPoint = p3: l3.EndPoint = p4
+    Set l4 = f2d.CreateLine(x0, y1, x0, y0): l4.StartPoint = p4: l4.EndPoint = p1
+End Sub
+
+Sub SymPad(sk, length)
+    Dim pad
+    gPart.InWorkObject = gBody
+    Set pad = gSF.AddNewPad(sk, length)
+    pad.IsSymmetric = True
+    gPart.Update
+End Sub
+
+' box between (x0,y0,z0) and (x1,y1,z1): XY sketch at mid height, symmetric pad
+Sub BoxP(x0, y0, z0, x1, y1, z1)
+    Dim sk, f2d, zm
+    zm = (z0 + z1) / 2
+    NewSketch 0, 0, 1, zm, 0, 0, zm, 1, 0, 0, 0, 1, 0, sk
+    Set f2d = sk.OpenEdition()
+    Rect f2d, x0, y0, x1, y1
+    sk.CloseEdition
+    SymPad sk, z1 - z0
+End Sub
+
+' cylinder / tube along Z
+Sub CylZ(cx, cy, z0, z1, ro, ri)
+    Dim sk, f2d, zm, c1, c2
+    zm = (z0 + z1) / 2
+    NewSketch 0, 0, 1, zm, 0, 0, zm, 1, 0, 0, 0, 1, 0, sk
+    Set f2d = sk.OpenEdition()
+    Set c1 = f2d.CreateClosedCircle(cx, cy, ro)
+    If ri > 0 Then Set c2 = f2d.CreateClosedCircle(cx, cy, ri)
+    sk.CloseEdition
+    SymPad sk, z1 - z0
+End Sub
+
+' cylinder along Y (sketch in plane y = ym, H = X, V = Z)
+Sub CylY(cx, cz, y0, y1, r)
+    Dim sk, f2d, ym, c1
+    ym = (y0 + y1) / 2
+    NewSketch 0, 1, 0, ym, 0, ym, 0, 1, 0, 0, 0, 0, 1, sk
+    Set f2d = sk.OpenEdition()
+    Set c1 = f2d.CreateClosedCircle(cx, cz, r)
+    sk.CloseEdition
+    SymPad sk, y1 - y0
+End Sub
+
+' 90 deg elbow: section OD 215 / ID 185 centred at (150, 0, 107.5), revolved
+' about the Z axis +/-45 deg. (Rotated +45 deg about Z in the assembly.)
+Sub Elbow()
+    Dim sk, f2d, c1, c2, ax, sh
+    NewSketch 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, sk
+    Set f2d = sk.OpenEdition()
+    Set c1 = f2d.CreateClosedCircle(150, 107.5, 107.5)
+    Set c2 = f2d.CreateClosedCircle(150, 107.5, 92.5)
+    Set ax = f2d.CreateLine(0, -50, 0, 400)
+    ax.Construction = True
+    sk.CenterLine = ax
+    sk.CloseEdition
+    gPart.InWorkObject = gBody
+    Set sh = gSF.AddNewShaft(sk)
+    sh.FirstAngle.Value = 45
+    sh.SecondAngle.Value = 45
+    gPart.Update
+End Sub
+
+Function StartPart(name)
+    Dim doc
+    Set doc = CATIA.Documents.Add("Part")
+    doc.Product.PartNumber = name
+    Set gPart = doc.Part
+    Set gBody = gPart.MainBody
+    Set gSF = gPart.ShapeFactory
+    Set gHSF = gPart.HybridShapeFactory
+    Set gHB = gPart.HybridBodies.Add()
+    gHB.Name = "Construction_Planes"
+    gN = 1
+    Set StartPart = doc
+End Function
+
+Sub FinishPart(doc, folder, name)
+    gPart.Update
+    ' hide construction planes
+    Dim sel: Set sel = doc.Selection
+    sel.Clear: sel.Add gHB: sel.VisProperties.SetShow 1: sel.Clear
+    doc.SaveAs folder & "\" & name & ".CATPart"
+    On Error Resume Next
+    doc.ExportData folder & "\" & name & ".stp", "stp"
+    If Err.Number <> 0 Then gStepFail = gStepFail & " " & name: Err.Clear
+    On Error GoTo 0
+End Sub
+
+Dim gStepFail
+
+Sub CATMain()
+    Dim folder, fso, docs, d, prodDoc, prods, comp
+    folder = InputBox("Folder to save the parts and assembly:", "Elbow cell builder", "C:\ElbowCell_CATIA")
+    If folder = "" Then Exit Sub
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(folder) Then fso.CreateFolder folder
+    CATIA.DisplayFileAlerts = False
+    Set docs = CreateObject("Scripting.Dictionary")
+    gStepFail = ""
+
+    ' ---- elbow_pipe (1 features)
+    Set d = StartPart("elbow_pipe")
+    Elbow
+    FinishPart d, folder, "elbow_pipe"
+    docs.Add "elbow_pipe", d
+
+    ' ---- gasket (1 features)
+    Set d = StartPart("gasket")
+    CylZ 0, 0, 0, 20, 92.5, 80.5
+    FinishPart d, folder, "gasket"
+    docs.Add "gasket", d
+
+    ' ---- interim_station (13 features)
+    Set d = StartPart("interim_station")
+    BoxP -300, -250, 560, 300, 250, 600
+    BoxP -280, -230, 0, -260, -210, 560
+    BoxP -280, 210, 0, -260, 230, 560
+    BoxP 260, -230, 0, 280, -210, 560
+    BoxP 260, 210, 0, 280, 230, 560
+    BoxP -300, -250, 100, 300, -230, 130
+    BoxP -300, 230, 100, 300, 250, 130
+    BoxP -60, -110, 600, 120, -40, 630
+    BoxP -110, -60, 600, -40, 120, 630
+    BoxP -20, -20, 600, 20, 20, 630
+    BoxP -40, -250, 600, 190, -215, 760
+    CylY 75, 737.5, -215, -155, 30
+    BoxP -40, -250, 760, 190, -100, 780
+    FinishPart d, folder, "interim_station"
+    docs.Add "interim_station", d
+
+    ' ---- packing_box (5 features)
+    Set d = StartPart("packing_box")
+    BoxP -286, -286, 0, 286, 286, 6
+    BoxP -286, -286, 6, -280, 286, 466
+    BoxP 280, -286, 6, 286, 286, 466
+    BoxP -280, -286, 6, 280, -280, 466
+    BoxP -280, 280, 6, 280, 286, 466
+    FinishPart d, folder, "packing_box"
+    docs.Add "packing_box", d
+
+    ' ---- vacuum_gripper (8 features)
+    Set d = StartPart("vacuum_gripper")
+    CylZ 0, 0, 0, 12, 40, 0
+    BoxP -30, -30, 12, 30, 30, 110
+    CylZ 0, 0, 110, 140, 14, 0
+    CylZ 0, 0, 140, 150, 22, 0
+    CylZ 0, 0, 150, 158, 30, 21
+    CylZ 0, 0, 158, 166, 30, 23
+    CylZ 0, 0, 166, 175, 33, 23
+    BoxP 30, -8, 60, 70, 8, 76
+    FinishPart d, folder, "vacuum_gripper"
+    docs.Add "vacuum_gripper", d
+
+    ' ---- box_conveyor (20 features)
+    Set d = StartPart("box_conveyor")
+    BoxP -700, -350, 360, 700, -320, 400
+    BoxP -700, 320, 360, 700, 350, 400
+    CylY -650, 375, -320, 320, 25
+    CylY -550, 375, -320, 320, 25
+    CylY -450, 375, -320, 320, 25
+    CylY -350, 375, -320, 320, 25
+    CylY -250, 375, -320, 320, 25
+    CylY -150, 375, -320, 320, 25
+    CylY -50, 375, -320, 320, 25
+    CylY 50, 375, -320, 320, 25
+    CylY 150, 375, -320, 320, 25
+    CylY 250, 375, -320, 320, 25
+    CylY 350, 375, -320, 320, 25
+    CylY 450, 375, -320, 320, 25
+    CylY 550, 375, -320, 320, 25
+    CylY 650, 375, -320, 320, 25
+    BoxP -700, -350, 0, -660, -310, 360
+    BoxP -700, 310, 0, -660, 350, 360
+    BoxP 660, -350, 0, 700, -310, 360
+    BoxP 660, 310, 0, 700, 350, 360
+    FinishPart d, folder, "box_conveyor"
+    docs.Add "box_conveyor", d
+
+    ' ---- robot_stand (3 features)
+    Set d = StartPart("robot_stand")
+    BoxP -200, -200, 0, 200, 200, 20
+    BoxP -150, -150, 20, 150, 150, 380
+    BoxP -200, -200, 380, 200, 200, 400
+    FinishPart d, folder, "robot_stand"
+    docs.Add "robot_stand", d
+
+    ' ---- infeed_conveyor (7 features)
+    Set d = StartPart("infeed_conveyor")
+    BoxP -300, 450, 560, 1700, 850, 600
+    BoxP -300, 440, 560, 1700, 450, 620
+    BoxP -300, 850, 560, 1700, 860, 620
+    BoxP -280, 460, 0, -240, 500, 560
+    BoxP -280, 800, 0, -240, 840, 560
+    BoxP 1640, 460, 0, 1680, 500, 560
+    BoxP 1640, 800, 0, 1680, 840, 560
+    FinishPart d, folder, "infeed_conveyor"
+    docs.Add "infeed_conveyor", d
+
+    ' ---- robot_marker (1 features)
+    Set d = StartPart("robot_marker")
+    CylZ 0, 0, 400, 1100, 110, 0
+    FinishPart d, folder, "robot_marker"
+    docs.Add "robot_marker", d
+
+    ' ---- assembly
+    Set prodDoc = CATIA.Documents.Add("Product")
+    prodDoc.Product.PartNumber = "cell_assembly"
+    Set prods = prodDoc.Product.Products
+    Set comp = prods.AddExternalComponent(docs.Item("robot_stand"))
+    comp.Name = "Robot_Stand"
+    comp.Move.Apply Array(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+    Set comp = prods.AddExternalComponent(docs.Item("robot_marker"))
+    comp.Name = "Robot_IRB1300_Marker"
+    comp.Move.Apply Array(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+    Set comp = prods.AddExternalComponent(docs.Item("infeed_conveyor"))
+    comp.Name = "Infeed_Conveyor"
+    comp.Move.Apply Array(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+    Set comp = prods.AddExternalComponent(docs.Item("interim_station"))
+    comp.Name = "Interim_Station"
+    comp.Move.Apply Array(1, 0, 0, 0, 1, 0, 0, 0, 1, 700, -200, 0)
+    Set comp = prods.AddExternalComponent(docs.Item("box_conveyor"))
+    comp.Name = "Box_Conveyor"
+    comp.Move.Apply Array(1, 0, 0, 0, 1, 0, 0, 0, 1, -150, -750, 0)
+    Set comp = prods.AddExternalComponent(docs.Item("packing_box"))
+    comp.Name = "Packing_Box"
+    comp.Move.Apply Array(1, 0, 0, 0, 1, 0, 0, 0, 1, -150, -750, 400)
+    Set comp = prods.AddExternalComponent(docs.Item("elbow_pipe"))
+    comp.Name = "Elbow_OnConveyor_1"
+    comp.Move.Apply Array(0.7071067812, 0.7071067812, 0, -0.7071067812, 0.7071067812, 0, 0, 0, 1, 400, 540, 600)
+    Set comp = prods.AddExternalComponent(docs.Item("elbow_pipe"))
+    comp.Name = "Elbow_OnConveyor_2"
+    comp.Move.Apply Array(0.7071067812, 0.7071067812, 0, -0.7071067812, 0.7071067812, 0, 0, 0, 1, 1000, 540, 600)
+    Set comp = prods.AddExternalComponent(docs.Item("elbow_pipe"))
+    comp.Name = "Elbow_AtInterim"
+    comp.Move.Apply Array(0.7071067812, 0.7071067812, 0, -0.7071067812, 0.7071067812, 0, 0, 0, 1, 625, -275, 630)
+    Set comp = prods.AddExternalComponent(docs.Item("gasket"))
+    comp.Name = "Gasket_AtInterim"
+    comp.Move.Apply Array(1, 0, 0, 0, 0, -1, 0, 1, 0, 775, -275, 737.5)
+    Set comp = prods.AddExternalComponent(docs.Item("elbow_pipe"))
+    comp.Name = "Elbow_InBox_1"
+    comp.Move.Apply Array(0.7071067812, 0.7071067812, 0, -0.7071067812, 0.7071067812, 0, 0, 0, 1, -422, -1022, 406)
+    Set comp = prods.AddExternalComponent(docs.Item("elbow_pipe"))
+    comp.Name = "Elbow_InBox_2"
+    comp.Move.Apply Array(0.7071067812, 0.7071067812, 0, -0.7071067812, 0.7071067812, 0, 0, 0, 1, -142, -1022, 406)
+    Set comp = prods.AddExternalComponent(docs.Item("elbow_pipe"))
+    comp.Name = "Elbow_InBox_3"
+    comp.Move.Apply Array(0.7071067812, 0.7071067812, 0, -0.7071067812, 0.7071067812, 0, 0, 0, 1, -422, -742, 406)
+    prodDoc.Product.Update
+    prodDoc.SaveAs folder & "\cell_assembly.CATProduct"
+    On Error Resume Next
+    prodDoc.ExportData folder & "\cell_assembly.stp", "stp"
+    If Err.Number <> 0 Then gStepFail = gStepFail & " cell_assembly": Err.Clear
+    On Error GoTo 0
+    CATIA.DisplayFileAlerts = True
+    If gStepFail = "" Then
+        MsgBox "Done. CATPart, CATProduct and STEP files saved in " & folder
+    Else
+        MsgBox "Done. CATPart / CATProduct saved in " & folder & vbCrLf & "STEP export failed for:" & gStepFail & vbCrLf & "(use File > Save As > .stp manually)"
+    End If
+End Sub
