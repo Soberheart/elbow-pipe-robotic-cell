@@ -11,7 +11,7 @@ Built for ABB RobotStudio.
 
 | Folder | What's inside |
 |---|---|
-| `cad/` | STL models (mm): elbow pipe (OD 215 / ID 185, bend R 150), gasket, interim station, packing box, vacuum gripper, carton conveyor, robot stand |
+| `cad/` | `cell_assembly.stl` – whole cell assembled in the world frame (robot shown as a cylinder marker); individual STL models (mm): elbow pipe (OD 215 / ID 185, bend R 150), gasket, interim station, packing box, vacuum gripper, carton conveyor, robot stand |
 | `rapid/` | `ElbowPickPlace.mod` – RAPID module: simulated vision offset, two-stage pick-and-place, box indexing, cycle-time logging |
 | `docs/` | Project report (.docx) and RobotStudio station build guide (Chinese) |
 | `figures/` | Model renders, top-view layout, workflow diagram, program flowchart, cycle-time estimate |
@@ -32,6 +32,7 @@ Estimated cycle ≈ 10.5 s/part (≈ 344 parts/h) before simulation – see `fig
 
 ```bash
 python3 scripts/make_models.py cad          # STL models
+python3 scripts/make_assembly.py cad cad/cell_assembly.stl  # assembled cell
 python3 scripts/render.py cad figures       # model renders
 python3 scripts/layout2d.py figures/fig_layout_top.png
 python3 scripts/cycle_estimate.py figures/cycle_estimate.csv
