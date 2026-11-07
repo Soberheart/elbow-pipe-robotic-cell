@@ -24,7 +24,19 @@ Built for ABB RobotStudio.
 3. Re-grip at contact point CP2
 4. Place in carton slot *n* (layer = n DIV 4, slot = n MOD 4); index carton after 8 parts
 
-Estimated cycle ≈ 10.5 s/part (≈ 344 parts/h) before simulation – see `figures/cycle_estimate.csv`.
+## Simulation results (RobotStudio 2026, OmniCore E10, RobotWare 8.2.2)
+
+| | Initial (ConfJ\Off) | Optimised (ConfJ\On + reference configs) |
+|---|---|---|
+| Avg cycle | 10.07 s | **7.94 s** |
+| Min / max | 8.28 / 12.40 s | 6.88 / 8.21 s |
+| Throughput | 358 parts/h | **453 parts/h** |
+
+Logs in `results/`. The initial run alternated between a normal and an over-head arm configuration
+(see `joint_log`); forcing the confdata of reference joint poses removed the loops.
+
+![Station](figures/rs_station.png)
+![TCP trace](figures/rs_paths.png)
 
 ![Flowchart](figures/fig_program_flow.png)
 
@@ -42,8 +54,9 @@ dot -Tpng scripts/program_flow.dot -o figures/fig_program_flow.png
 ## Status
 
 - [x] CAD models, RAPID program, diagrams, report draft
-- [ ] RobotStudio station (Smart Components, I/O), simulation run, Pack & Go
-- [ ] Measured cycle time and screenshots in the report
+- [x] RobotStudio station (SC_Gripper, SC_Infeed, Station Logic), simulation run, Pack & Go (not stored here, 72 MB)
+- [x] Measured cycle time and screenshots in the report
+- [ ] Group names / photo in the report
 
 ## CATIA
 

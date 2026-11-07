@@ -41,6 +41,14 @@ MODULE ElbowPickPlace
     CONST robtarget pCP1:=[[106.07,106.07,215],[0,1,0,0],[0,0,0,0],[9E9,9E9,9E9,9E9,9E9,9E9]];
     CONST robtarget pCP2:=[[38.82,144.89,215],[0,1,0,0],[0,0,0,0],[9E9,9E9,9E9,9E9,9E9,9E9]];
     CONST jointtarget jHome:=[[0,-10,20,0,60,0],[9E9,9E9,9E9,9E9,9E9,9E9]];
+    ! Reference joint poses (front, elbow-up, wrist-down) for each station.
+    ! Their arm configuration is copied into the targets so that ConfJ\On
+    ! forces the same, compact configuration every cycle (no over-head flips).
+    CONST jointtarget jPickRef:=[[52,14,27,0,49,-130],[9E9,9E9,9E9,9E9,9E9,9E9]];
+    CONST jointtarget jInterRef:=[[-12,2,38,0,50,-192],[9E9,9E9,9E9,9E9,9E9,9E9]];
+    CONST jointtarget jBoxRef:=[[-98,20,35,0,40,-278],[9E9,9E9,9E9,9E9,9E9,9E9]];
+    VAR confdata cfPick; VAR confdata cfInter; VAR confdata cfBox;
+    VAR robtarget pRef; VAR robtarget pT;
 
     !------------------------------------------------------------- parameters
     CONST num nRows:=2;            ! slots along box X
@@ -49,7 +57,7 @@ MODULE ElbowPickPlace
     CONST num nPitch:=280;         ! slot pitch [mm]
     CONST num nLayerH:=215;        ! layer height = pipe OD [mm]
     CONST num nSlot0:=-272;        ! first slot part-origin offset from box centre
-    CONST num nBatch:=16;          ! parts to run (2 boxes)
+    CONST num nBatch:=8;           ! parts to run (one full box)
     CONST num nApproach:=150;      ! approach / retract height [mm]
     CONST num tGasket:=1.5;        ! gasket insertion dwell [s]
     CONST num tVac:=0.2;           ! vacuum build-up / release [s]
@@ -59,7 +67,8 @@ MODULE ElbowPickPlace
     VAR speeddata vGrip:=[150,100,5000,1000];
 
     !------------------------------------------------------------- I/O (virtual)
-    ! diPartReady : from infeed conveyor plane sensor (Smart Component)
+    ! diPartReady : from infeed volume sensor (Smart Component)
+    ! doFeed1..4  : to infeed Smart Component, spawn a part in pose 1..4
     ! doVacuum    : to gripper Smart Component (Attacher / Detacher)
     ! doGasket    : to interim station (gasket press animation)
     ! doBoxFull   : to carton conveyor (index full box out, new box in)
@@ -69,10 +78,17 @@ MODULE ElbowPickPlace
     VAR num nCount:=0;             ! parts placed in current box
     VAR num nTotal:=0;             ! parts placed in batch
     VAR num nSeed:=1234;           ! pseudo-random seed (simulated vision)
+    VAR num nPose;                 ! selected part pose 1..4
+    ! Four part poses on the conveyor as reported by the (simulated) camera:
+    ! [dx mm, dy mm, dRz deg]. The infeed Smart Component spawns the part in
+    ! the same pose (doFeed1..4), so camera result and part pose agree.
+    CONST num POSE{4,3}:=[[15,-10,6],[-12,14,-8],[8,18,-3],[-18,-6,9]];
     VAR num dX; VAR num dY; VAR num dRz;
     VAR clock clkCycle; VAR clock clkBatch;
     VAR num tCycle; VAR num tSum:=0; VAR num tMin:=999; VAR num tMax:=0;
     VAR iodev logFile;
+    VAR iodev jLog;
+    VAR jointtarget jNow;
 
     !=======================================================================
     PROC main()
@@ -98,12 +114,18 @@ MODULE ElbowPickPlace
     PROC Init()
         AccSet 100, 100;
         VelSet 100, 2000;
+        ConfJ \On;
+        ConfL \On;
+        pRef:=CalcRobT(jPickRef, tVacuum \WObj:=wobj0);  cfPick:=pRef.robconf;
+        pRef:=CalcRobT(jInterRef, tVacuum \WObj:=wobj0); cfInter:=pRef.robconf;
+        pRef:=CalcRobT(jBoxRef, tVacuum \WObj:=wobj0);   cfBox:=pRef.robconf;
         SetDO doVacuum, 0; SetDO doGasket, 0; SetDO doBoxFull, 0; SetDO doConvStop, 0;
         GripLoad load0;
         nCount:=0; nTotal:=0; tSum:=0; tMin:=999; tMax:=0;
         MoveAbsJ jHome, vFast, fine, tVacuum;
         Open "HOME:" \File:="cycle_log.csv", logFile \Write;
         Write logFile, "part,box_slot,layer,dx_mm,dy_mm,drz_deg,cycle_s";
+        Open "HOME:" \File:="joint_log.csv", jLog \Write;
         ClkReset clkBatch; ClkStart clkBatch;
     ENDPROC
 
@@ -115,53 +137,70 @@ MODULE ElbowPickPlace
     ENDFUNC
 
     PROC GetVisionOffset()
-        dX:=(Rnd()-0.5)*40;           ! +/-20 mm
-        dY:=(Rnd()-0.5)*40;           ! +/-20 mm
-        dRz:=(Rnd()-0.5)*20;          ! +/-10 deg
+        ! pick one of the four poses at random and feed a part in that pose
+        nPose:=Trunc(Rnd()*4)+1;
+        IF nPose>4 nPose:=4;
+        dX:=POSE{nPose,1};
+        dY:=POSE{nPose,2};
+        dRz:=POSE{nPose,3};
+        TEST nPose
+        CASE 1: PulseDO \PLength:=0.2, doFeed1;
+        CASE 2: PulseDO \PLength:=0.2, doFeed2;
+        CASE 3: PulseDO \PLength:=0.2, doFeed3;
+        CASE 4: PulseDO \PLength:=0.2, doFeed4;
+        ENDTEST
+        ! camera result -> object frame of the vision work object
         wobjVision.oframe.trans:=[dX,dY,0];
         wobjVision.oframe.rot:=OrientZYX(dRz,0,0);
     ENDPROC
 
     !-----------------------------------------------------------------------
     PROC PickConveyor()
-        MoveJ Offs(pCP1,0,0,nApproach), vFast, z50, tVacuum\WObj:=wobjVision;
+        pT:=pCP1; pT.robconf:=cfPick;
+        MoveJ Offs(pT,0,0,nApproach), vFast, z50, tVacuum\WObj:=wobjVision;
         WaitDI diPartReady, 1 \MaxTime:=30;
         SetDO doConvStop, 1;
-        MoveL Offs(pCP1,0,0,20), vApp, z5, tVacuum\WObj:=wobjVision;
-        MoveL pCP1, vGrip, fine, tVacuum\WObj:=wobjVision;
+        MoveL Offs(pT,0,0,20), vApp, z5, tVacuum\WObj:=wobjVision;
+        MoveL pT, vGrip, fine, tVacuum\WObj:=wobjVision;
         SetDO doVacuum, 1;
+        LogJ "pick";
         WaitTime tVac;
         GripLoad ldElbowCP1;
-        MoveL Offs(pCP1,0,0,nApproach), vApp, z20, tVacuum\WObj:=wobjVision;
+        MoveL Offs(pT,0,0,nApproach), vApp, z20, tVacuum\WObj:=wobjVision;
         SetDO doConvStop, 0;
     ENDPROC
 
     PROC PlaceInterim()
         ! Part is placed square to the fixture: target uses nominal orientation,
         ! so the vision rotation dRz is removed during the transfer.
-        MoveJ Offs(pCP1,0,0,nApproach), vFast, z50, tVacuum\WObj:=wobjInterim;
-        MoveL Offs(pCP1,0,0,10), vApp, z5, tVacuum\WObj:=wobjInterim;
-        MoveL pCP1, vGrip, fine, tVacuum\WObj:=wobjInterim;
+        pT:=pCP1; pT.robconf:=cfInter;
+        MoveJ Offs(pT,0,0,nApproach), vFast, z50, tVacuum\WObj:=wobjInterim;
+        MoveL Offs(pT,0,0,10), vApp, z5, tVacuum\WObj:=wobjInterim;
+        MoveL pT, vGrip, fine, tVacuum\WObj:=wobjInterim;
         SetDO doVacuum, 0;
+        LogJ "interim_place";
         WaitTime tVac;
         GripLoad load0;
-        MoveL Offs(pCP1,0,0,60), vApp, z10, tVacuum\WObj:=wobjInterim;
+        MoveL Offs(pT,0,0,60), vApp, z10, tVacuum\WObj:=wobjInterim;
     ENDPROC
 
     PROC InsertGasket()
+        pT:=pCP2; pT.robconf:=cfInter;
         ! Robot moves over CP2 while the press inserts the gasket in end A.
         PulseDO \PLength:=tGasket, doGasket;
-        MoveL Offs(pCP2,0,0,60), vApp, fine, tVacuum\WObj:=wobjInterim;
+        MoveL Offs(pT,0,0,60), vApp, fine, tVacuum\WObj:=wobjInterim;
         WaitTime tGasket;
     ENDPROC
 
     PROC RegripInterim()
-        MoveL Offs(pCP2,0,0,20), vApp, z5, tVacuum\WObj:=wobjInterim;
-        MoveL pCP2, vGrip, fine, tVacuum\WObj:=wobjInterim;
+        pT:=pCP2; pT.robconf:=cfInter;
+        MoveL Offs(pT,0,0,20), vApp, z5, tVacuum\WObj:=wobjInterim;
+        MoveL pT, vGrip, fine, tVacuum\WObj:=wobjInterim;
         SetDO doVacuum, 1;
+        LogJ "regrip";
         WaitTime tVac;
         GripLoad ldElbowCP2;
-        MoveL Offs(pCP2,0,0,nApproach), vApp, z20, tVacuum\WObj:=wobjInterim;
+        MoveL Offs(pT,0,0,nApproach), vApp, z20, tVacuum\WObj:=wobjInterim;
     ENDPROC
 
     !-----------------------------------------------------------------------
@@ -178,10 +217,12 @@ MODULE ElbowPickPlace
         oy:=nSlot0+nCol*nPitch;
         oz:=nLayer*nLayerH;
         pPlace:=Offs(pCP2, ox, oy, oz);
+        pPlace.robconf:=cfBox;
         MoveJ Offs(pPlace,0,0,nApproach+200), vFast, z100, tVacuum\WObj:=wobjBox;
         MoveL Offs(pPlace,0,0,30), vApp, z10, tVacuum\WObj:=wobjBox;
         MoveL pPlace, vGrip, fine, tVacuum\WObj:=wobjBox;
         SetDO doVacuum, 0;
+        LogJ "box_place";
         WaitTime tVac;
         GripLoad load0;
         MoveL Offs(pPlace,0,0,nApproach+200), vApp, z50, tVacuum\WObj:=wobjBox;
@@ -196,6 +237,11 @@ MODULE ElbowPickPlace
     ENDPROC
 
     !-----------------------------------------------------------------------
+    PROC LogJ(string tag)
+        jNow:=CJointT();
+        Write jLog, tag+","+NumToStr(jNow.robax.rax_1,1)+","+NumToStr(jNow.robax.rax_2,1)+","+NumToStr(jNow.robax.rax_3,1)+","+NumToStr(jNow.robax.rax_4,1)+","+NumToStr(jNow.robax.rax_5,1)+","+NumToStr(jNow.robax.rax_6,1);
+    ENDPROC
+
     PROC LogCycle()
         tSum:=tSum+tCycle;
         IF tCycle < tMin tMin:=tCycle;
@@ -221,6 +267,7 @@ MODULE ElbowPickPlace
         Write logFile, "avg,"+NumToStr(tAvg,3)+",min,"+NumToStr(tMin,3)+",max,"+NumToStr(tMax,3)
             +",throughput_pph,"+NumToStr(3600/tAvg,0);
         Close logFile;
+        Close jLog;
     ENDPROC
 
 ENDMODULE
