@@ -7,9 +7,9 @@ MODULE ElbowPickPlace
     !              (2) place on interim station, gasket is inserted
     !              (3) re-grip at contact point CP2
     !              (4) place at indexed slot in packing box (2 x 2 x 2 = 8)
-    ! Vision     : simulated - each new part gets a pseudo-random offset
-    !              (+/-20 mm in X/Y, +/-10 deg about Z) written into the
-    !              object frame of wobjVision, exactly as a camera would.
+    ! Vision     : simulated - each new part arrives in one of four poses;
+    !              its offset (dx, dy, dRz) is written into the object
+    !              frame of wobjVision, as a camera would report it.
     ! Units      : mm, deg. All user frames are given in the world frame.
     !***********************************************************************
 
@@ -130,7 +130,7 @@ MODULE ElbowPickPlace
     ENDPROC
 
     !-----------------------------------------------------------------------
-    ! Simulated vision: Wichmann-Hill style generator, integer-exact in num.
+    ! Simulated vision: multiplicative congruential generator, exact in num.
     FUNC num Rnd()
         nSeed:=(171*nSeed) MOD 30269;
         RETURN nSeed/30269;
